@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deals CRM • Kanban Dashboard</title>
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    /* ===== Shiny / Sheen animations ===== */
+    .shiny-text {
+      background: linear-gradient(90deg, #8b5cf6, #d946ef, #f59e0b, #22d3ee, #8b5cf6);
+      background-size: 300% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      animation: shimmer 6s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .btn-sheen {
+      position: relative;
+      overflow: hidden;
+      isolation: isolate;
+    }
+    .btn-sheen::after {
+      content: "";
+      position: absolute; inset: -150% -20% auto auto;
+      width: 40%; height: 300%;
+      transform: rotate(25deg);
+      background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.7) 50%, rgba(255,255,255,0) 100%);
+      animation: sweep 2.8s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes sweep { from { left: -60%; } to { left: 120%; } }
+
+    .card-shine {
+      position: relative;
+      overflow: hidden;
+    }
+    .card-shine::before {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(1200px 120px at -10% -10%, rgba(255,255,255,.12), transparent 60%);
+      opacity: 0; transition: opacity .3s ease;
+      pointer-events: none;
+    }
+    .card-shine:hover::before { opacity: 1; }
+
+    /* Drop highlight */
+    .drop-target {
+      transition: box-shadow .2s ease, transform .2s ease;
+    }
+    .drop-target.drag-over {
+      box-shadow: inset 0 0 0 3px rgba(34,211,238,.7), 0 0 0 4px rgba(99,102,241,.3);
+      transform: scale(1.01);
+    }
+
+    /* Shake for failure */
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-6px); }
+      40% { transform: translateX(6px); }
+      60% { transform: translateX(-4px); }
+      80% { transform: translateX(4px); }
+    }
+    .shake { animation: shake .45s ease; }
+
+    /* Glow ring pulse (on add) */
+    @keyframes ringPulse {
+      0% { box-shadow: 0 0 0 0 rgba(34,211,238,.6); }
+      70% { box-shadow: 0 0 0 12px rgba(34,211,238,0); }
+      100% { box-shadow: 0 0 0 0 rgba(34,211,238,0); }
+    }
+    .ring-pulse { animation: ringPulse 1.2s ease-out; }
+
+    /* Scrollbar subtle */
+    .nice-scrollbar::-webkit-scrollbar { height: 10px; width: 10px; }
+    .nice-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    .nice-scrollbar::-webkit-scrollbar-track { background: transparent; }
+
+    dialog[open] { animation: in .15s ease-out; }
+    @keyframes in { from { opacity: 0; transform: scale(.98) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+  <!-- Header -->
+  <header class="sticky top-0 z-20 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 md:px-6 py-4 flex items-center gap-3">
+      <div class="h-10 w-10 rounded-2xl bg-gradient-to-tr from-fuchsia-500 via-amber-400 to-cyan-400 animate-pulse"></div>
+      <div class="flex-1">
+        <h1 class="text-xl md:text-2xl font-extrabold shiny-text tracking-tight">Deals CRM • Kanban Dashboard</h1>
+        <p class="text-xs md:text-sm text-slate-500">Drag deals across stages • Click a deal to edit • Stored in localStorage</p>
+      </div>
+      <button id="addDealBtn" class="btn-sheen ring-1 ring-slate-200 hover:ring-slate-300 bg-slate-900 text-white px-3 md:px-4 py-2 rounded-xl text-sm font-semibold shadow-md hover:shadow-lg active:scale-[.98] transition flex items-center gap-2">
+        <span>➕</span><span>Add Deal</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Board -->
+  <main class="max-w-[1600px] mx-auto px-3 md:px-6 py-6">
+    <div class="flex gap-4 overflow-x-auto nice-scrollbar pb-4" id="board" aria-label="Kanban board">
+      <!-- Columns will be injected here -->
+    </div>
+  </main>
+
+  <!-- Deal Modal -->
+  <dialog id="dealModal" class="rounded-2xl w-[92vw] max-w-xl p-0 bg-white shadow-2xl">
+    <form id="dealForm" method="dialog" class="p-5 md:p-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h2 id="modalTitle" class="text-lg md:text-xl font-bold">Add Deal</h2>
+          <p class="text-xs text-slate-500">Fields marked * are required</p>
+        </div>
+        <button type="button" id="closeModal" class="text-slate-500 hover:text-slate-800 text-xl leading-none">×</button>
+      </div>
+
+      <input type="hidden" id="dealId" />
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label class="text-sm">Title*<input id="title" required class="mt-1 w-full rounded-lg border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 ring-1 ring-inset px-3 py-2 outline-none" placeholder="e.g. Website Redesign" /></label>
+        <label class="text-sm">Company<input id="company" class="mt-1 w-full rounded-lg ring-1 ring-inset border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 px-3 py-2 outline-none" placeholder="e.g. Acme Ltd" /></label>
+        <label class="text-sm">Owner<input id="owner" class="mt-1 w-full rounded-lg ring-1 ring-inset border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 px-3 py-2 outline-none" placeholder="e.g. Dattu" /></label>
+        <label class="text-sm">Value (₹)*<input id="value" type="number" min="0" step="100" required class="mt-1 w-full rounded-lg ring-1 ring-inset border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 px-3 py-2 outline-none" placeholder="e.g. 50000" /></label>
+        <label class="text-sm">Close Date<input id="closeDate" type="date" class="mt-1 w-full rounded-lg ring-1 ring-inset border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 px-3 py-2 outline-none" /></label>
+        <label class="text-sm">Priority
+          <select id="priority" class="mt-1 w-full rounded-lg ring-1 ring-inset border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 px-3 py-2 outline-none">
+            <option>Medium</option>
+            <option>High</option>
+            <option>Low</option>
+          </select>
+        </label>
+        <label class="text-sm md:col-span-2">Stage
+          <select id="stage" class="mt-1 w-full rounded-lg ring-1 ring-inset border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 px-3 py-2 outline-none"></select>
+        </label>
+        <label class="text-sm md:col-span-2">Notes
+          <textarea id="notes" rows="3" class="mt-1 w-full rounded-lg ring-1 ring-inset border-slate-200 focus:border-cyan-400 focus:ring-cyan-100 px-3 py-2 outline-none" placeholder="Optional notes..."></textarea>
+        </label>
+      </div>
+
+      <div class="mt-5 flex items-center justify-between">
+        <button type="button" id="deleteBtn" class="hidden text-red-600 hover:text-red-700 text-sm font-semibold">🗑️ Delete</button>
+        <div class="flex items-center gap-3">
+          <button type="button" id="cancelBtn" class="px-4 py-2 rounded-lg ring-1 ring-inset ring-slate-200 hover:bg-slate-50 text-sm font-semibold">Cancel</button>
+          <button type="submit" class="btn-sheen bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Save Deal</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 hidden px-4 py-2 rounded-xl bg-slate-900 text-white text-sm shadow-xl"></div>
+
+  <script>
+    /*********************************
+     * Deals CRM – Single-file App   *
+     *********************************/
+    const STAGES = [
+      { id: 'New',            color: 'from-slate-100 to-slate-50' },
+      { id: 'Qualified',      color: 'from-emerald-50 to-teal-50' },
+      { id: 'Proposal',       color: 'from-sky-50 to-cyan-50' },
+      { id: 'Negotiation',    color: 'from-indigo-50 to-fuchsia-50' },
+      { id: 'Won',            color: 'from-amber-50 to-yellow-50' },
+      { id: 'Lost',           color: 'from-rose-50 to-red-50' },
+    ];
+
+    const LS_KEY = 'dealsCRM_v1';
+
+    let deals = [];
+
+    // Elements
+    const board = document.getElementById('board');
+    const addDealBtn = document.getElementById('addDealBtn');
+    const dealModal = document.getElementById('dealModal');
+    const closeModalBtn = document.getElementById('closeModal');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const dealForm = document.getElementById('dealForm');
+    const toast = document.getElementById('toast');
+
+    const modalTitle = document.getElementById('modalTitle');
+    const dealIdInput = document.getElementById('dealId');
+    const titleInput = document.getElementById('title');
+    const companyInput = document.getElementById('company');
+    const ownerInput = document.getElementById('owner');
+    const valueInput = document.getElementById('value');
+    const closeDateInput = document.getElementById('closeDate');
+    const priorityInput = document.getElementById('priority');
+    const stageInput = document.getElementById('stage');
+    const notesInput = document.getElementById('notes');
+
+    // Populate Stage select
+    STAGES.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id; opt.textContent = s.id; stageInput.appendChild(opt);
+    });
+
+    function uid() { return Math.random().toString(36).slice(2, 10); }
+
+    function saveDeals() { localStorage.setItem(LS_KEY, JSON.stringify(deals)); }
+    function loadDeals() {
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        deals = raw ? JSON.parse(raw) : seedDeals();
+      } catch (e) {
+        console.warn('Failed to load deals, seeding…', e);
+        deals = seedDeals();
+      }
+    }
+
+    function seedDeals() {
+      const sample = [
+        { id: uid(), title: 'GST Guide Implementation', company: 'StartUpOne', owner: 'Dattu', value: 35000, closeDate: '', priority: 'High', stage: 'New', notes: 'Landing + calculator' },
+        { id: uid(), title: 'Amma-ma Foods Website Revamp', company: 'Amma-ma Foods', owner: 'Manoj', value: 120000, closeDate: '', priority: 'Medium', stage: 'Qualified', notes: 'E‑com + admin dashboard' },
+        { id: uid(), title: 'Local Biz SEO Package', company: 'Ongole Mart', owner: 'Dattu', value: 25000, closeDate: '', priority: 'Low', stage: 'Proposal', notes: '3‑month retainer' },
+        { id: uid(), title: 'Academy Dashboard', company: 'MasterNext Academy', owner: 'Team', value: 80000, closeDate: '', priority: 'High', stage: 'Negotiation', notes: 'Supabase + Lovable' },
+      ];
+      localStorage.setItem(LS_KEY, JSON.stringify(sample));
+      return sample;
+    }
+
+    function currency(n){
+      n = Number(n||0);
+      return '₹' + n.toLocaleString('en-IN');
+    }
+
+    function showToast(msg){
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(()=> toast.classList.add('hidden'), 1800);
+    }
+
+    function openModal(mode='add', d=null){
+      modalTitle.textContent = mode === 'add' ? 'Add Deal' : 'Edit Deal';
+      deleteBtn.classList.toggle('hidden', mode !== 'edit');
+
+      if (mode === 'edit' && d){
+        dealIdInput.value = d.id;
+        titleInput.value = d.title || '';
+        companyInput.value = d.company || '';
+        ownerInput.value = d.owner || '';
+        valueInput.value = d.value || '';
+        closeDateInput.value = d.closeDate || '';
+        priorityInput.value = d.priority || 'Medium';
+        stageInput.value = d.stage || 'New';
+        notesInput.value = d.notes || '';
+      } else {
+        dealIdInput.value = '';
+        dealForm.reset();
+        priorityInput.value = 'Medium';
+        stageInput.value = 'New';
+      }
+
+      dealModal.showModal();
+    }
+
+    function closeModal(){ dealModal.close(); }
+
+    function upsertDealFromForm(){
+      const id = dealIdInput.value || uid();
+      const exists = deals.find(x=>x.id===id);
+      const payload = {
+        id,
+        title: titleInput.value.trim(),
+        company: companyInput.value.trim(),
+        owner: ownerInput.value.trim(),
+        value: Number(valueInput.value || 0),
+        closeDate: closeDateInput.value,
+        priority: priorityInput.value,
+        stage: stageInput.value,
+        notes: notesInput.value.trim(),
+      };
+      if (!payload.title || !payload.value){
+        showToast('Please fill required fields.');
+        return;
+      }
+      if (exists){
+        Object.assign(exists, payload);
+        showToast('Deal updated.');
+      } else {
+        deals.push(payload);
+        showToast('Deal added.');
+        pulseStage(payload.stage);
+      }
+      saveDeals();
+      renderBoard();
+      closeModal();
+    }
+
+    function deleteDealById(id){
+      deals = deals.filter(d=>d.id!==id);
+      saveDeals();
+      renderBoard();
+      showToast('Deal deleted.');
+    }
+
+    function stageTotals(stageId){
+      const rows = deals.filter(d=>d.stage===stageId);
+      const total = rows.reduce((s,d)=>s + Number(d.value||0), 0);
+      return { count: rows.length, total };
+    }
+
+    function makeCard(d){
+      const badgeColor = d.priority === 'High' ? 'bg-rose-100 text-rose-700' : d.priority === 'Low' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-700';
+      const el = document.createElement('div');
+      el.className = 'card-shine group rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition p-3 cursor-grab active:cursor-grabbing';
+      el.setAttribute('draggable','true');
+      el.dataset.id = d.id;
+      el.innerHTML = `
+        <div class="flex items-start justify-between gap-2">
+          <div class="font-semibold leading-snug">${escapeHtml(d.title)}</div>
+          <div class="text-xs ${badgeColor} px-2 py-0.5 rounded-full">${d.priority}</div>
+        </div>
+        <div class="mt-1 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+          <span>🏢 ${escapeHtml(d.company||'—')}</span>
+          <span>👤 ${escapeHtml(d.owner||'—')}</span>
+        </div>
+        <div class="mt-2 flex items-center justify-between text-sm">
+          <div class="font-bold">${currency(d.value)}</div>
+          <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
+            <button class="edit px-2 py-1 rounded-lg ring-1 ring-slate-200 hover:bg-slate-50" title="Edit">✏️</button>
+            <button class="del px-2 py-1 rounded-lg ring-1 ring-slate-200 hover:bg-slate-50" title="Delete">🗑️</button>
+          </div>
+        </div>
+        ${d.closeDate ? `<div class="mt-1 text-[11px] text-slate-500">📅 ${d.closeDate}</div>` : ''}
+      `;
+
+      el.addEventListener('dragstart', (ev)=>{
+        ev.dataTransfer.setData('text/plain', d.id);
+        setTimeout(()=> el.classList.add('opacity-60'), 0);
+      });
+      el.addEventListener('dragend', ()=> el.classList.remove('opacity-60'));
+
+      el.querySelector('.edit').addEventListener('click', ()=> openModal('edit', d));
+      el.querySelector('.del').addEventListener('click', ()=>{
+        if (confirm('Delete this deal?')) deleteDealById(d.id);
+      });
+
+      el.addEventListener('click', (e)=>{
+        // Clicking card (not buttons) also edits
+        if (!(e.target && (e.target.classList.contains('edit')||e.target.classList.contains('del')))){
+          openModal('edit', d);
+        }
+      });
+
+      return el;
+    }
+
+    function makeColumn(stage){
+      const wrap = document.createElement('section');
+      wrap.className = 'min-w-[280px] md:min-w-[320px] w-[320px] flex-shrink-0';
+      const head = document.createElement('div');
+      head.className = `rounded-2xl p-4 bg-gradient-to-b ${stage.color} border border-slate-200/70`;
+      const { count, total } = stageTotals(stage.id);
+      head.innerHTML = `
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-bold tracking-wide">${stage.id}</h3>
+          <div class="text-xs text-slate-600">${count} • <span class="font-semibold">${currency(total)}</span></div>
+        </div>
+        <div class="mt-3 drop-target rounded-xl bg-white/80 backdrop-blur border border-slate-200 min-h-[180px] p-2 space-y-2" data-stage="${stage.id}" aria-label="${stage.id} column" ></div>
+      `;
+
+      const dropzone = head.querySelector('[data-stage]');
+
+      dropzone.addEventListener('dragover', (ev)=>{ ev.preventDefault(); dropzone.classList.add('drag-over'); });
+      dropzone.addEventListener('dragleave', ()=> dropzone.classList.remove('drag-over'));
+      dropzone.addEventListener('drop', (ev)=>{
+        ev.preventDefault();
+        dropzone.classList.remove('drag-over');
+        const id = ev.dataTransfer.getData('text/plain');
+        const deal = deals.find(x=>x.id===id);
+        if (!deal) return;
+        const prev = deal.stage;
+        deal.stage = stage.id;
+        saveDeals();
+        renderBoard();
+        if (stage.id === 'Won' && prev !== 'Won') successEffects();
+        if (stage.id === 'Lost' && prev !== 'Lost') failureEffects();
+      });
+
+      wrap.appendChild(head);
+      return wrap;
+    }
+
+    function renderBoard(){
+      // Clear board
+      board.innerHTML = '';
+      // Build columns fresh
+      STAGES.forEach(stage => {
+        const col = makeColumn(stage);
+        board.appendChild(col);
+      });
+      // Fill cards
+      STAGES.forEach(stage=>{
+        const container = board.querySelector(`[data-stage="${stage.id}"]`);
+        deals.filter(d=>d.stage===stage.id).forEach(d=> container.appendChild(makeCard(d)));
+        if (!container.hasChildNodes()){
+          const empty = document.createElement('div');
+          empty.className = 'text-center text-xs text-slate-400 py-4';
+          empty.textContent = 'Drop deals here';
+          container.appendChild(empty);
+        }
+      });
+    }
+
+    function pulseStage(stageId){
+      const el = board.querySelector(`[data-stage="${stageId}"]`);
+      if (el){ el.classList.add('ring-pulse'); setTimeout(()=> el.classList.remove('ring-pulse'), 900); }
+    }
+
+    // Success / Failure UX
+    function successEffects(){
+      // Confetti burst
+      const end = Date.now() + 400;
+      (function frame(){
+        confetti({ particleCount: 32, spread: 60, startVelocity: 45, origin: { y: .25 } });
+        if (Date.now() < end) requestAnimationFrame(frame);
+      })();
+      // Bell-like sound via Web Audio
+      bell();
+      showToast('🎉 Deal won! Congrats!');
+    }
+
+    function failureEffects(){
+      // Shake Lost column
+      const lost = board.querySelector('[data-stage="Lost"]').parentElement;
+      if (lost){ lost.classList.add('shake'); setTimeout(()=> lost.classList.remove('shake'), 500); }
+      // Buzzer
+      buzzer();
+      showToast('💔 Deal marked as Lost.');
+    }
+
+    // Simple tones with Web Audio API (no external audio files)
+    function bell(){
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.value = 880; // A5
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+      o.connect(g).connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.42);
+      // quick second chime
+      const o2 = ctx.createOscillator(); const g2 = ctx.createGain();
+      o2.type='triangle'; o2.frequency.value=1318; // E6
+      g2.gain.setValueAtTime(0.0001, ctx.currentTime+0.08);
+      g2.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.11);
+      g2.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+      o2.connect(g2).connect(ctx.destination);
+      o2.start(ctx.currentTime+0.08); o2.stop(ctx.currentTime + 0.52);
+    }
+
+    function buzzer(){
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.type='sawtooth'; o.frequency.setValueAtTime(220, ctx.currentTime);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      o.connect(g).connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.37);
+    }
+
+    function escapeHtml(s){
+      return (s||'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+
+    // Event wiring
+    addDealBtn.addEventListener('click', ()=> openModal('add'));
+    closeModalBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+
+    dealForm.addEventListener('submit', (e)=>{ e.preventDefault(); upsertDealFromForm(); });
+    deleteBtn.addEventListener('click', ()=>{
+      const id = dealIdInput.value; if (!id) return;
+      if (confirm('Delete this deal?')) { deleteDealById(id); closeModal(); }
+    });
+
+    // Init
+    loadDeals();
+    renderBoard();
+
+    // Keyboard ESC to close modal
+    document.addEventListener('keydown', (e)=>{ if (e.key==='Escape' && dealModal.open){ e.preventDefault(); closeModal(); }});
+  </script>
+
+  <!-- Footer note -->
+  <footer class="px-4 md:px-6 pb-10 text-center text-xs text-slate-400">
+    Built with ❤️ for MasterNext • Stored locally in your browser • Export/Import could be added later
+  </footer>
+</body>
+</html>
